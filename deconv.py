@@ -3,16 +3,17 @@
 from sys import exit
 import os
 
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'jg-skunkworks-641aebdfbb4f.json'
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = {YOUR JSON CREDENTIAL KEYFILE} 
 
 
-def deidentify_with_det (
+def transform_with_det (
     project,
     input_str,
     info_types,
     surrogate_type=None,
-    key_name="projects/jg-skunkworks/locations/global/keyRings/dlp-keyring/cryptoKeys/dlp-key",
-    wrapped_key="CiQAOqKojrL9JXFhK3RY/8F6Pnmt6XXiPzffmY1OD4VaeS9emkQSSQD6od+dmqvlgEjBSaUW/YnrnWwP3AwLBLVTNUsbNcrJlIbBXKljYkGzYFW48JA++l+YvDdwqB+N2wDI97Azt6iuw2cd+QB2NIU="
+    key_name='{YOUR DLP KEY}',
+    wrapped_key='{YOUR WRAPPED KEY}',
+    encrypt=True
 ):
     """Uses the Data Loss Prevention API to deidentify sensitive data in a
     string using Format Preserving Encryption (FPE).
@@ -29,6 +30,8 @@ def deidentify_with_det (
             keyRings/YOUR_KEYRING_NAME/cryptoKeys/YOUR_KEY_NAME'
         wrapped_key: The encrypted ('wrapped') AES-256 key to use. This key
             should be encrypted using the Cloud KMS key specified by key_name.
+        encrypt: determines if we're encrypting or decrypting. True to encrypt,
+            False to decrypt
     Returns:
         None; the response from the API is printed to the terminal.
     """
@@ -59,10 +62,13 @@ def deidentify_with_det (
         crypto_deterministic_config["surrogate_info_type"] = {"name": surrogate_type}
 
     # Construct inspect configuration dictionary
-    inspect_config = {"info_types": [{"name": info_type} for info_type in info_types]}
+    if encrypt is True:
+        inspect_config = {"info_types": [{"name": info_type} for info_type in info_types]}
+    else:
+        inspect_config = {"custom_info_types":[{"info_type": {"name": info_type},"surrogate_type":{}} for info_type in info_types]}
 
     # Construct deidentify configuration dictionary
-    deidentify_config = {
+    transform_config = {
         "info_type_transformations": {
             "transformations": [
                 {
@@ -76,17 +82,22 @@ def deidentify_with_det (
 
     # Convert string to item
     item = {"value": input_str}
-    request={
+    if encrypt is True:
+        request={
             "parent": parent,
-            "deidentify_config": deidentify_config,
+            "deidentify_config": transform_config,
             "inspect_config": inspect_config,
             "item": item,
-	}
-
-    print("DEBUG: ", request)
-
-    # Call the API
-    response = dlp.deidentify_content(request)
+	    }
+        response = dlp.deidentify_content(request)
+    else:
+        request={
+            "parent": parent,
+            "reidentify_config": transform_config,
+            "inspect_config": inspect_config,
+            "item": item
+            }
+        response = dlp.reidentify_content(request)
 
     # Print results
     return(response.item.value)
@@ -94,14 +105,15 @@ def deidentify_with_det (
 
 
 ### MAIN ###
-infotypes = ['PERSON_NAME']
 rows = [
     "Ainsley Wilson",
     "Colby Morin",
-    "Cherokee Vinson",
+    "Charles Vinson",
     "Ferdinand Gilmore",
     "Mia Robbins"]
 
 for row in rows:
-   print("NAME = %s" % (row))
-   print(deidentify_with_det(project='jg-skunkworks',input_str=row,info_types=infotypes,surrogate_type="NAME_TOKEN"))
+   print("Name: %s" % (row))
+   encrypted = transform_with_det(project='jg-skunkworks',input_str=row,info_types=['PERSON_NAME'],surrogate_type="NAME_TOKEN",encrypt=True)
+   decrypted = transform_with_det(project='jg-skunkworks',input_str=encrypted,info_types=['NAME_TOKEN'],surrogate_type="NAME_TOKEN",encrypt=False)
+   print("Encrypted: %s\nDecrypted: %s\n"%(encrypted,decrypted))
